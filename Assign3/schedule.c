@@ -13,7 +13,7 @@ static void save_current_context()
   /*Your code goes in here*/ 
 } 
 
-static void schedule_context(struct exec_context *next, u64* ptr)
+static void schedule_context(struct exec_context *next, u64* ptr, int flag)
 {
   /*Your code goes in here. get_current_ctx() still returns the old context*/
    // u64* ptr;
@@ -23,7 +23,7 @@ static void schedule_context(struct exec_context *next, u64* ptr)
  printf("scheduling: old pid = %d  new pid  = %d\n", curr->pid, next->pid); /*XXX: Don't remove*/
 
 /*Your code for scheduling context*/
-
+   printf("------------------------\n");
    //ptr contains pointer to rbp
 
    asm volatile ("mov %%r15,%0" : "=r" (curr->regs.r15));
@@ -52,7 +52,8 @@ static void schedule_context(struct exec_context *next, u64* ptr)
    /*These two lines must be executed*/
    set_tss_stack_ptr(next);
    set_current_ctx(next);
-
+   if(flag==1) ack_irq();
+   // printf("------------------------\n");
    *ptr = next->regs.rbp;
    *(ptr+1) = next->regs.entry_rip;
    *(ptr+2) = next->regs.entry_cs;
@@ -61,7 +62,7 @@ static void schedule_context(struct exec_context *next, u64* ptr)
    *(ptr+5) = next->regs.entry_ss;
 
    next->state = RUNNING;
-
+// printf("------------------------\n");
    asm volatile ("mov %0,%%r15" : "=r" (next->regs.r15));
    asm volatile ("mov %0,%%r14" : "=r" (next->regs.r14));
    asm volatile ("mov %0,%%r13" : "=r" (next->regs.r13));
@@ -152,7 +153,8 @@ void handle_timer_tick()
         if(next->state == READY){
           //schedule it
            curr->state = READY;
-           schedule_context(next, ptr);
+           // schedule_context(next,  ptr,1);
+           sleeping = next;
            ready = 1;
            break;
         }
@@ -172,8 +174,9 @@ if(sleeping->ticks_to_sleep==0){
   sleeping->ticks_to_sleep--;
     // printf("--------------------\n");
   curr->state=READY;
-  sleeping->state=RUNNING;
+  sleeping->state=RUNNING;*/
     //pushing current registers to context of current process
+    if(ready==1){
   asm volatile ("mov %%r15,%0" : "=r" (curr->regs.r15));
   asm volatile ("mov %%r14,%0" : "=r" (curr->regs.r14));
   asm volatile ("mov %%r13,%0" : "=r" (curr->regs.r13));
@@ -191,7 +194,7 @@ if(sleeping->ticks_to_sleep==0){
   asm volatile ("mov %%rax,%0" : "=r" (curr->regs.rax));
     //current registers pushed
     // printf("--------------------\n");
-  u64* ptr;
+  // u64* ptr;
   asm volatile ( "mov %%rbp, %0;" : "=r" (ptr));
   curr->regs.rbp = *ptr;
   curr->regs.entry_rip = *(ptr+1);
@@ -199,6 +202,8 @@ if(sleeping->ticks_to_sleep==0){
   curr->regs.entry_rflags = *(ptr+3);
   curr->regs.entry_rsp = *(ptr+4);
   curr->regs.entry_ss = *(ptr+5);
+ printf("scheduling: old pid = %d  new pid  = %d\n", curr->pid, sleeping->pid); //XXX: Don't remove
+
 
   set_tss_stack_ptr(sleeping);
   set_current_ctx(sleeping);
@@ -236,7 +241,7 @@ if(sleeping->ticks_to_sleep==0){
     "iretq;"
     :::"memory");
 }
-*/
+
   // printf("coming here\n");
 
   // sleeping->ticks_to_sleep--;
@@ -289,7 +294,7 @@ void do_exit()
     struct exec_context *next = &(list[ind]);
     if(next->state == READY){
       //schedule it
-      schedule_context(next, ptr);
+      schedule_context(next, ptr,0);
       ready = 1;
       break;
    }
@@ -298,7 +303,7 @@ void do_exit()
    if(ready==0 && wait==1){
     //schedule swapper
    struct exec_context *next = &(list[0]);
-   schedule_context(next, ptr);
+   schedule_context(next, ptr,0);
    }
    else if(ready==0 && wait==0) do_cleanup();  /*Call this conditionally, see comments above*/
 }
@@ -343,6 +348,7 @@ long do_sleep(u32 ticks)
 
     if(ready == 0) swapper = get_ctx_by_pid(0);
     swapper->state=RUNNING;
+    printf("------------------------\n");
   set_current_ctx(swapper);
   set_tss_stack_ptr(swapper);
   asm volatile ("mov %0,%%r15" : "=r" (swapper->regs.r15));
@@ -406,7 +412,7 @@ long do_clone(void *th_func, void *user_stack)
    //set os_stack_pfn, name and regs
   new->os_stack_pfn = os_pfn_alloc(OS_PT_REG);
   // memcpy(new->name,curr->name,(u32)(new->pid));
-  char copy[50];
+  char copy[CNAME_MAX   ];
   int n = strlen(curr->name);
   memcpy(copy,curr->name,n);
   int pid = new->pid;
