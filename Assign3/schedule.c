@@ -289,7 +289,7 @@ void do_exit()
     struct exec_context *curr = get_current_ctx();
     curr->state = UNUSED;
     struct exec_context *list = get_ctx_list();
-    printf("---------entering do_exit------------- with pid = %x \n",curr->pid);
+    // printf("------entering do_exit-------- with pid = %x \n",curr->pid);
     // printf("rbp == %x\n", *ptr);
     int ready = 0, wait = 0;
     for(int i=1;i<16;i++){
@@ -299,7 +299,7 @@ void do_exit()
         else ind = i+curr->pid;
         struct exec_context *next = &(list[ind]);
         if(next->state == READY){
-            printf("swapping with pid = %x\n",next->pid );
+            // printf("swapping with pid = %x\n",next->pid );
             //schedule it
             // schedule_context(next, ptr,0);
             printf("scheduling: old pid = %d  new pid  = %d\n", curr->pid, next->pid); //XXX: Don't remove
@@ -428,7 +428,7 @@ void do_exit()
     :::"memory");
     }
     else if(ready==0 && wait==0) {
-        printf("coming inside do_cleanup\n");
+        printf("do_cleanup\n");
         do_cleanup();  //Call this conditionally, see comments above
     }
 }
@@ -518,7 +518,7 @@ long do_clone(void *th_func, void *user_stack)
     struct exec_context *new = get_new_ctx();
     struct exec_context *curr = get_current_ctx();
     // u64 k = *th_func;
-    printf("th_func address = %x\n",th_func );
+    // printf("th_func address = %x\n",th_func );
     u64* addr=(u64*)((((u64)curr->os_stack_pfn+1)<<12)-8);
     new->type = curr->type;
     new->pgd = curr->pgd;
