@@ -161,7 +161,6 @@ void handle_timer_tick()
         }
     }
     // printf("current pid = %x\n", curr->pid);
-  //------------------------------------------
   /*
     if(ready==0){
     schedule_context(list[0]);
@@ -205,7 +204,7 @@ void handle_timer_tick()
         curr->regs.entry_rflags = *(ptr+3);
         curr->regs.entry_rsp = *(ptr+4);
         curr->regs.entry_ss = *(ptr+5);
-        printf("scheduling: old pid = %d  new pid  = %d\n", curr->pid, sleeping->pid); //XXX: Don't remove
+        printf("scheduling: old pid = %d  new pid = %d\n", curr->pid, sleeping->pid); //XXX: Don't remove
 
         set_tss_stack_ptr(sleeping);
         set_current_ctx(sleeping);
@@ -302,7 +301,7 @@ void do_exit()
             // printf("swapping with pid = %x\n",next->pid );
             //schedule it
             // schedule_context(next, ptr,0);
-            printf("scheduling: old pid = %d  new pid  = %d\n", curr->pid, next->pid); //XXX: Don't remove
+            printf("scheduling: old pid = %d  new pid = %d\n", curr->pid, next->pid); //XXX: Don't remove
 
     asm volatile ("mov %%r15,%0" : "=r" (curr->regs.r15));
     asm volatile ("mov %%r14,%0" : "=r" (curr->regs.r14));
@@ -369,7 +368,7 @@ void do_exit()
         //schedule swapper
         struct exec_context *next = &(list[0]);
         // schedule_context(next, ptr,0);
-        printf("scheduling: old pid = %d  new pid  = %d\n", curr->pid, next->pid); //XXX: Don't remove
+        printf("scheduling: old pid = %d  new pid = %d\n", curr->pid, next->pid); //XXX: Don't remove
 
     asm volatile ("mov %%r15,%0" : "=r" (curr->regs.r15));
     asm volatile ("mov %%r14,%0" : "=r" (curr->regs.r14));
@@ -427,8 +426,9 @@ void do_exit()
     "iretq;"
     :::"memory");
     }
-    else if(ready==0 && wait==0) {
+    else if(ready==0 && wait==0){
         printf("do_cleanup\n");
+        os_pfn_free(OS_PT_REG,curr->pgd);
         do_cleanup();  //Call this conditionally, see comments above
     }
 }
@@ -474,7 +474,7 @@ long do_sleep(u32 ticks)
 
     if(ready == 0) swapper = get_ctx_by_pid(0);
     swapper->state=RUNNING;
-    printf("scheduling: old pid = %d  new pid  = %d\n", curr->pid, swapper->pid); //XXX: Don't remove
+    printf("scheduling: old pid = %d  new pid = %d\n", curr->pid, swapper->pid); //XXX: Don't remove
 
     // printf("------------------------\n");
     set_current_ctx(swapper);
@@ -542,7 +542,7 @@ long do_clone(void *th_func, void *user_stack)
     //set os_stack_pfn, name and regs
     new->os_stack_pfn = os_pfn_alloc(OS_PT_REG);
     // memcpy(new->name,curr->name,(u32)(new->pid));
-    char copy[CNAME_MAX   ];
+    char copy[CNAME_MAX];
     int n = strlen(curr->name);
     memcpy(copy,curr->name,n);
     int pid = new->pid;
