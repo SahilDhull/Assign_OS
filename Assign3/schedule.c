@@ -137,11 +137,8 @@ void do_exit()
     struct exec_context *curr = get_current_ctx();
     curr->state = UNUSED;
     struct exec_context *list = get_ctx_list();
-    // printf("------entering do_exit-------- with pid = %x \n",curr->pid);
-    // printf("rbp == %x\n", *ptr);
     int ready = 0, wait = 0;
     struct exec_context * next;
-    // printf("coming in do exit\n");
     for(int i=1;i<16;i++){
         int ind ;
         if(((i+curr->pid)%16)==0) continue;
@@ -151,38 +148,38 @@ void do_exit()
             ready = 1;
             
             printf("scheduling: old pid = %d  new pid = %d\n", curr->pid, next->pid); //XXX: Don't remove
-        next->state = RUNNING;
-        os_pfn_free(OS_PT_REG,curr->os_stack_pfn);
-        set_tss_stack_ptr(next);
-        set_current_ctx(next);
-        asm volatile ( "mov %%rbp, %0;" : "=r" (ptr));
-        *ptr = next->regs.rbp;
-        *(ptr+1) = next->regs.entry_rip;
-        *(ptr+2) = next->regs.entry_cs;
-        *(ptr+3) = next->regs.entry_rflags;
-        *(ptr+4) = next->regs.entry_rsp;
-        *(ptr+5) = next->regs.entry_ss;
+            next->state = RUNNING;
+            os_pfn_free(OS_PT_REG,curr->os_stack_pfn);
+            set_tss_stack_ptr(next);
+            set_current_ctx(next);
+            asm volatile ( "mov %%rbp, %0;" : "=r" (ptr));
+            *ptr = next->regs.rbp;
+            *(ptr+1) = next->regs.entry_rip;
+            *(ptr+2) = next->regs.entry_cs;
+            *(ptr+3) = next->regs.entry_rflags;
+            *(ptr+4) = next->regs.entry_rsp;
+            *(ptr+5) = next->regs.entry_ss;
 
-        asm volatile ("mov %0,%%r15;" ::"r"(next->regs.r15));
-        asm volatile ("mov %0,%%r14;" ::"r"(next->regs.r14));
-        asm volatile ("mov %0,%%r13;" ::"r"(next->regs.r13));
-        asm volatile ("mov %0,%%r12;" ::"r"(next->regs.r12));
-        asm volatile ("mov %0,%%r11;" ::"r"(next->regs.r11));
-        asm volatile ("mov %0,%%r10;" ::"r"(next->regs.r10));
-        asm volatile ("mov %0,%%r9 ;" ::"r"(next->regs.r9 ));
-        asm volatile ("mov %0,%%r8 ;" ::"r"(next->regs.r8 ));
-        asm volatile ("mov %0,%%rdi;" ::"r"(next->regs.rdi));
-        asm volatile ("mov %0,%%rsi;" ::"r"(next->regs.rsi));
-        asm volatile ("mov %0,%%rdx;" ::"r"(next->regs.rdx));
-        asm volatile ("mov %0,%%rcx;" ::"r"(next->regs.rcx));
-        asm volatile ("mov %0,%%rbx;" ::"r"(next->regs.rbx));
-        asm volatile ("mov %0,%%rax;" ::"r"(next->regs.rax));
+            asm volatile ("mov %0,%%r15;" ::"r"(next->regs.r15));
+            asm volatile ("mov %0,%%r14;" ::"r"(next->regs.r14));
+            asm volatile ("mov %0,%%r13;" ::"r"(next->regs.r13));
+            asm volatile ("mov %0,%%r12;" ::"r"(next->regs.r12));
+            asm volatile ("mov %0,%%r11;" ::"r"(next->regs.r11));
+            asm volatile ("mov %0,%%r10;" ::"r"(next->regs.r10));
+            asm volatile ("mov %0,%%r9 ;" ::"r"(next->regs.r9 ));
+            asm volatile ("mov %0,%%r8 ;" ::"r"(next->regs.r8 ));
+            asm volatile ("mov %0,%%rdi;" ::"r"(next->regs.rdi));
+            asm volatile ("mov %0,%%rsi;" ::"r"(next->regs.rsi));
+            asm volatile ("mov %0,%%rdx;" ::"r"(next->regs.rdx));
+            asm volatile ("mov %0,%%rcx;" ::"r"(next->regs.rcx));
+            asm volatile ("mov %0,%%rbx;" ::"r"(next->regs.rbx));
+            asm volatile ("mov %0,%%rax;" ::"r"(next->regs.rax));
 
-        asm volatile("mov %%rbp, %%rsp;"
-        "pop %%rbp;"
-        "iretq;"
-        :::"memory");
-        // */
+            asm volatile("mov %%rbp, %%rsp;"
+            "pop %%rbp;"
+            "iretq;"
+            :::"memory");
+            // */
             break;
         }
         if(next->state == WAITING) wait=1;
@@ -223,8 +220,7 @@ void do_exit()
         :::"memory");
     }
     else if(ready==0 && wait==0){
-        // printf("do_cleanup\n");
-        do_cleanup();  //Call this conditionally, see comments above
+        do_cleanup();
     }
 }
 
@@ -270,7 +266,6 @@ long do_sleep(u32 ticks)
     *(ptr+3) = next->regs.entry_rflags;
     *(ptr+4) = next->regs.entry_rsp;
     *(ptr+5) = next->regs.entry_ss;
-    // printf("------------------------\n");
     set_current_ctx(next);
     set_tss_stack_ptr(next);
     next->state=RUNNING;
@@ -302,8 +297,6 @@ long do_clone(void *th_func, void *user_stack)
     asm volatile ( "mov %%rbp, %0;" : "=r" (ptr));
     struct exec_context *new = get_new_ctx();
     struct exec_context *curr = get_current_ctx();
-    // u64 k = *th_func;
-    // printf("th_func address = %x\n",th_func );
     u64* addr=(u64*)((((u64)curr->os_stack_pfn+1)<<12)-8);
     new->type = curr->type;
     new->pgd = curr->pgd;
@@ -348,14 +341,11 @@ long do_clone(void *th_func, void *user_stack)
     new->regs.entry_rip = (u64)th_func;
     new->regs.entry_rsp = (u64)user_stack;
     new->regs.rbp = (u64)user_stack;
-    //change in rflags
 
     new->state = READY;
 }
 
 long invoke_sync_signal(int signo, u64 *ustackp, u64 *urip){
-    /*If signal handler is registered, manipulate user stack and RIP to execute signal handler*/
-    /*ustackp and urip are pointers to user RSP and user RIP in the exception/interrupt stack*/
     printf("Called signal with ustackp=%x urip=%x\n", *ustackp, *urip);
     /*Default behavior is exit( ) if sighandler is not registered for SIGFPE or SIGSEGV.
     Ignore for SIGALRM*/
@@ -370,23 +360,18 @@ long invoke_sync_signal(int signo, u64 *ustackp, u64 *urip){
         *(c-1) = *urip;
         *(ustackp) = (u64)(c-1);
         *(urip) = (u64)((curr->sighandlers)[signo]);
-        // printf("%x   %x\n", *ustackp,*urip);
-        // printf("custom handler %x\n", curr->sighandlers[signo]);
     }
 }
 /*system call handler for signal, to register a handler*/
 long do_signal(int signo, unsigned long handler)
 {
-    // printf("Handler Address : ----------------%x \n", handler);
     struct exec_context *curr = get_current_ctx();
     (curr->sighandlers)[signo] = (void*)handler;
 }
 /*system call handler for alarm*/
 long do_alarm(u32 ticks)
 {
-    // printf("coming here\n");
     struct exec_context *curr = get_current_ctx();
     curr->alarm_config_time = ticks;
     curr->ticks_to_alarm = ticks;
-    // printf(" ticks to alarm in the handler = = %x\n", curr->ticks_to_alarm);
 }
