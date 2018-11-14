@@ -1,8 +1,8 @@
 #include "lib.h"
 
 #define MAX_OBJS 1e6
-#define MAX_INODE_BLOCKS 31
-#define MAX_DATA_BLOCKS 256
+#define IMAP_BLOCKS 31
+#define DMAP_BLOCKS 256
 #define inode_offset 287
 #define OBJ_SIZE 88
 #define data_offset (int)(22528+287)
@@ -22,6 +22,8 @@ struct object *objs;
 struct object *obj_backup;
 unsigned int* i_bitmap;
 unsigned int* d_bitmap;
+// unsigned int* dmap;
+int* darray;
 
 #define malloc_4k(x,y) do{\
                          (x) = mmap(NULL, y, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);\
@@ -38,7 +40,7 @@ long find_object_id(const char *key, struct objfs_state *objfs)
 {
   // dprintf("-------------find_object_id\n");
   struct object *obj = objs;
-  for(int j=0; j < MAX_INODE_BLOCKS*BLOCK_SIZE/4 ; j++){
+  for(int j=0; j < IMAP_BLOCKS*BLOCK_SIZE/4 ; j++){
     for(int k=31; k >=0; k--){
       if(((i_bitmap[j]>>k)&1)==1){
         if(obj->id && !strcmp(obj->key, key)){
@@ -71,12 +73,13 @@ long create_object(const char *key, struct objfs_state *objfs)
   struct object *obj = objs;
   struct object *free = NULL; 
   int ctr=0,flag=0;
-  for(int j=0; j < MAX_INODE_BLOCKS*BLOCK_SIZE/4; j++){
+  for(int j=0; j < IMAP_BLOCKS*BLOCK_SIZE/4; j++){
     for(int k=31; k >=0; k--){
       if(((i_bitmap[j]>>k)&1)==0 && !free){
         free=obj;
         free->id=ctr+2;
         i_bitmap[j] = (i_bitmap[j] | (1<<k));
+        darray[ctr/46]=1;
         flag=1;
         break;
       }
@@ -120,9 +123,51 @@ long release_object(int objid, struct objfs_state *objfs)
   Return value: Success --> 0
                 Failure --> -1
 */
+
 long destroy_object(const char *key, struct objfs_state *objfs)
 {
-    return -1;
+  dprintf("inside destroy object with key = %s\n",key);
+  struct object *obj = objs;
+  for(int j=0; j < IMAP_BLOCKS*BLOCK_SIZE/4 ; j++){
+    for(int k=31; k >=0; k--){
+      if(((i_bitmap[j]>>k)&1)==1){
+        if(!strcmp(obj->key, key)){
+          i_bitmap[j] = ((i_bitmap[j])^(1<<k));
+          // dmap[j] = (dmap[j]|(1<<k));
+          darray[j*32+k]=1;
+          for(int i=0; i < 4; i++){
+            if(obj->d_ptr[i]){
+              int value = obj->d_ptr[i]-data_offset;
+              int q = value/32;
+              int r = value%32;
+              d_bitmap[q] = (d_bitmap[q]^(1<<(31-r)));
+            }
+            // else break;
+          }
+          for(int i=0; i < 4; i++){
+            if(obj->i_ptr[i]){
+              int* temp;
+              malloc_4k(temp,BLOCK_SIZE);
+              read_block(objfs,obj->i_ptr[i],(char*)temp);
+              for(int l=0; l < 1024; l++){
+                if(temp[l]){
+                  int value = temp[l]-data_offset;
+                  int q = value/32;
+                  int r = value%32;
+                  d_bitmap[q] = (d_bitmap[q]^(1<<(31-r)));
+                }
+              }
+            }
+            // else break;
+          }
+          dprintf("okay\n");
+          return 0;
+        }
+      }
+      obj++;
+    }
+  }
+  return -1;
 }
 
 /*
@@ -134,7 +179,19 @@ long destroy_object(const char *key, struct objfs_state *objfs)
 
 long rename_object(const char *key, const char *newname, struct objfs_state *objfs)
 {
-   
+  struct object *obj = objs;
+  for(int j=0; j < IMAP_BLOCKS*BLOCK_SIZE/4 ; j++){
+    for(int k=31; k >=0; k--){
+      if(((i_bitmap[j]>>k)&1)==1){
+        if(!strcmp(obj->key, key)){
+          strcpy(obj->key,newname);
+          darray[j*32+k]=1;
+          return obj->id;
+        }
+      }
+      obj++;
+    }
+  }
    return -1;
 }
 
@@ -146,7 +203,7 @@ long rename_object(const char *key, const char *newname, struct objfs_state *obj
 
 int free_addr(){
   int ctr=0;
-  for(int j=0; j < MAX_DATA_BLOCKS*BLOCK_SIZE/4 ; j++){
+  for(int j=0; j < DMAP_BLOCKS*BLOCK_SIZE/4 ; j++){
     for(int k=31; k >=0; k--){
       if(((d_bitmap[j]>>k)&1)==0){
         d_bitmap[j] = (d_bitmap[j] | (1<<k));
@@ -175,6 +232,10 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
   if(size > BLOCK_SIZE) 
     return -1;
   dprintf("Doing write size = %d\n", size);
+  // to check------------
+  int value = obj->id-2;
+  darray[value/46]=1;
+  //---------------
   int pos = free_addr();
   if(pos==-1){
     return -1;
@@ -307,11 +368,26 @@ int objstore_init(struct objfs_state *objfs)
   dprintf("Entered objstore init\n");
   malloc_4k(objs,22528*BLOCK_SIZE);
   malloc_4k(obj_backup,OBJ_SIZE);
-  for(int i=0;i<MAX_INODE_BLOCKS;i++){
-    read_block(objfs,i,(char*)((char*)objs+i*BLOCK_SIZE));
+  for(int i=0;i<22528;i++){
+    //block_size to be changed by 4048
+    read_block(objfs,i+inode_offset,(char*)((char*)objs+i*BLOCK_SIZE));
   }
-  malloc_4k(i_bitmap,MAX_INODE_BLOCKS*BLOCK_SIZE);
-  malloc_4k(d_bitmap,MAX_DATA_BLOCKS*BLOCK_SIZE);
+  malloc_4k(i_bitmap,IMAP_BLOCKS*BLOCK_SIZE);
+  malloc_4k(d_bitmap,DMAP_BLOCKS*BLOCK_SIZE);
+  // malloc_4k(dmap,IMAP_BLOCKS*BLOCK_SIZE);
+  malloc_4k(darray,22528*4);
+  for(int i=0; i < 22528; i++){
+    darray[i]=0;
+  }
+  for(int i=0; i < IMAP_BLOCKS; i++){
+    read_block(objfs,i,(char*)((char*)i_bitmap+i*BLOCK_SIZE));
+  }
+  for(int i=0; i < DMAP_BLOCKS; i++){
+    read_block(objfs,i+IMAP_BLOCKS,((char*)d_bitmap+i*BLOCK_SIZE));
+  }
+  // for(int i=0; i < 22528; i++){
+  //   read_block(objfs,inode_offset+i,((char*)objs+i*4048));
+  // }
   dprintf("Done objstore init\n");
   return 0;
 }
@@ -321,6 +397,17 @@ int objstore_init(struct objfs_state *objfs)
 */
 int objstore_destroy(struct objfs_state *objfs)
 {
-   dprintf("Done objstore destroy\n");
-   return 0;
+  for(int i=0; i < IMAP_BLOCKS; i++){
+    write_block(objfs,i,(char*)((char*)i_bitmap+i*BLOCK_SIZE));
+  }
+  for(int i=0; i < DMAP_BLOCKS; i++){
+    write_block(objfs,i+IMAP_BLOCKS,((char*)d_bitmap+i*BLOCK_SIZE));
+  }
+  for(int i=0; i < 22528; i++){
+    if(darray[i]==1){
+      write_block(objfs,inode_offset+i,((char*)objs+i*BLOCK_SIZE));
+    }
+  }
+  dprintf("Done objstore destroy\n");
+  return 0;
 }
