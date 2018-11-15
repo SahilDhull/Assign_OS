@@ -1,6 +1,7 @@
 #include "lib.h"
 #include<pthread.h>
-
+// pthreads and duplicate (in rename) implemented, to check if pthreads is working or not, working on simple code
+// duplicate to be checked
 #define MAX_OBJS 1e6
 #define IMAP_BLOCKS 31
 #define DMAP_BLOCKS 256
@@ -196,7 +197,7 @@ long destroy_object(const char *key, struct objfs_state *objfs)
                 Failure --> -1
 */
 
-//-----------------------------------check for duplicates--------------------------
+//--------------------------check duplicate implementation--------------------------
 
 long rename_object(const char *key, const char *newname, struct objfs_state *objfs)
 {
@@ -204,6 +205,19 @@ long rename_object(const char *key, const char *newname, struct objfs_state *obj
   struct object *obj = objs;
   int ctr=0;
   //check for duplicates
+  for(int j=0; j < IMAP_BLOCKS*BLOCK_SIZE/4 ; j++){
+    for(int k=31; k >=0; k--){
+      if(((i_bitmap[j]>>k)&1)==1){
+        if(!strcmp(obj->key, newname)){
+          return -1;
+        }
+      }
+      obj++;
+      ctr++;
+    }
+  }
+  ctr=0;
+  obj = objs;
   for(int j=0; j < IMAP_BLOCKS*BLOCK_SIZE/4 ; j++){
     for(int k=31; k >=0; k--){
       if(((i_bitmap[j]>>k)&1)==1){
@@ -256,20 +270,20 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
     // dprintf("%c",(*(buf+i)));
   }
   // dprintf("objstore_write size = %u\n",size);
-  dprintf("--------------\n");
+  // dprintf("--------------\n");
   struct object *obj = objs + objid - 2;
   if(obj->id != objid)
     return -1;
   if(size > BLOCK_SIZE) 
     return -1;
   dprintf("Doing write size = %d\n", size);
-  pthread_mutex_lock(&dlock);
+  // pthread_mutex_lock(&dlock);
   int value = obj->id-2;
   darray[value/46]=1;
   //lock
-  // pthread_mutex_lock(&dlock);
+  pthread_mutex_lock(&dlock);
   int pos = free_addr();
-  // pthread_mutex_unlock(&dlock);
+  pthread_mutex_unlock(&dlock);
   //unlock
   if(pos==-1){
     free_4k(buf2,BLOCK_SIZE);
@@ -281,7 +295,7 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
   int num = offset/BLOCK_SIZE;
   if(num<4){
     //lock -- to check
-    // pthread_mutex_lock(&dlock);
+    pthread_mutex_lock(&dlock);
     if(!obj->d_ptr[num]){
       obj->size+=BLOCK_SIZE;
     }
@@ -317,7 +331,7 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
     }
     else return -1;
     //lock
-    // pthread_mutex_lock(&dlock);
+    pthread_mutex_lock(&dlock);
     if(!obj->i_ptr[i]){
       // pthread_mutex_lock(&dlock);
       int pos2 = free_addr();
