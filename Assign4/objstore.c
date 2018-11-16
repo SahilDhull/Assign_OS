@@ -1,6 +1,8 @@
 #include "lib.h"
 #include<pthread.h>
 
+//all pthreads done but not tested
+
 #define MAX_OBJS 1e6
 #define IMAP_BLOCKS 31
 #define DMAP_BLOCKS 256
@@ -25,6 +27,7 @@ int global_counter = 0;
 
 pthread_mutex_t ilock;
 pthread_mutex_t dlock;
+pthread_mutex_t cache_lock;
 
 struct object *objs;
 struct object *obj_backup;
@@ -146,7 +149,6 @@ long release_object(int objid, struct objfs_state *objfs)
                 Failure --> -1
 */
 
-
 long rename_object(const char *key, const char *newname, struct objfs_state *objfs)
 {
   // //dprintf("=======================\n");
@@ -212,6 +214,7 @@ int free_addr(){
 #ifdef CACHE
 
 void new_write(struct objfs_state *objfs,int pos,char *buf2){
+  pthread_mutex_lock(&cache_lock);
   int block = pos/CACHE_VALUE;
   int block_offset = pos%CACHE_VALUE;
   char *cache_ptr = objfs->cache;
@@ -225,11 +228,13 @@ void new_write(struct objfs_state *objfs,int pos,char *buf2){
   for(int i=0; i < BLOCK_SIZE; i++) *(pointer+i) = *(buf2+i);
   cache_dirty[block_offset]=1;
   cache_array[block_offset] = block;
+  pthread_mutex_unlock(&cache_lock);
   // //dprintf("in write cache, pos = %d\n",pos);
 }
 
 void new_read(struct objfs_state *objfs,int pos,char *buf2){
   // //dprintf("in read cache, pos = %d\n",pos);
+  pthread_mutex_lock(&cache_lock);
   int block = pos/CACHE_VALUE;
   int block_offset = pos%CACHE_VALUE;
   char *cache_ptr = objfs->cache;
@@ -247,7 +252,7 @@ void new_read(struct objfs_state *objfs,int pos,char *buf2){
     cache_array[block_offset] = block;
   }
   for(int i=0; i < BLOCK_SIZE; i++) *(buf2+i) = *(pointer+i);
-  
+  pthread_mutex_unlock(&cache_lock);
 }
 
 long objstore_write(int objid, const char *buf, int size, struct objfs_state *objfs, off_t offset)
@@ -281,7 +286,9 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
   }
 
   //cache
+  // pthread_mutex_lock(&cache_lock);
   new_write(objfs,pos,buf2); //---------------new_write
+  // pthread_mutex_unlock(&cache_lock);
   // write_block(objfs,data_offset+pos,(char*)buf2);
   
   // write_block(objfs,data_offset+pos,(char*)buf2);
@@ -337,7 +344,9 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
       for(int j=0; j < 1024; j++) temp[j]=0;
       temp[place] = data_offset + pos;
       // write_block(objfs,data_offset+pos2,(char*)temp);
+      // pthread_mutex_lock(&cache_lock);
       new_write(objfs,pos2,(char*)temp);
+      // pthread_mutex_unlock(&cache_lock);
       free_4k(temp,BLOCK_SIZE);
       obj->size+=size;
       pthread_mutex_unlock(&dlock);
@@ -347,7 +356,9 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
       int* temp;
       malloc_4k(temp,BLOCK_SIZE);
       // read_block(objfs,obj->i_ptr[i],(char*)temp);
+      // pthread_mutex_lock(&cache_lock);
       new_read(objfs,obj->i_ptr[i]-data_offset,(char*)temp);
+      // pthread_mutex_unlock(&cache_lock);
       if(!temp[place]){
         obj->size+=size;
       }
@@ -361,7 +372,9 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
       //change data bitmap for idirect case
       temp[place] = data_offset+pos;
       // write_block(objfs,obj->i_ptr[i],(char*)temp);
+      // pthread_mutex_lock(&cache_lock);
       new_write(objfs,obj->i_ptr[i]-data_offset,(char*)temp);
+      // pthread_mutex_unlock(&cache_lock);
       free_4k(temp,BLOCK_SIZE);
       pthread_mutex_unlock(&dlock);
       return size;
@@ -394,7 +407,9 @@ long objstore_read(int objid, char *buf, int size, struct objfs_state *objfs, of
   for(int i=0; i < 4; i++){
    if(n>0&&skip<=0){
     // read_block(objfs,obj->d_ptr[i],(char*)(temp+count*BLOCK_SIZE));
+    // pthread_mutex_lock(&cache_lock);
     new_read(objfs,obj->d_ptr[i]-data_offset,(char*)(temp+count*BLOCK_SIZE));
+    // pthread_mutex_unlock(&cache_lock);
     n--;
     count++;
    }
@@ -406,7 +421,9 @@ long objstore_read(int objid, char *buf, int size, struct objfs_state *objfs, of
     int* i_value;
     malloc_4k(i_value,BLOCK_SIZE);
     // read_block(objfs,obj->i_ptr[i],(char*)(i_value));
+    // pthread_mutex_lock(&cache_lock);
     new_read(objfs,obj->i_ptr[i]-data_offset,(char*)(i_value));
+    // pthread_mutex_lock(&cache_lock);
     //dprintf("hh\n");
     for(int j=0; j < 1024; j++){
       if(n>0&&skip<=0){
@@ -414,7 +431,9 @@ long objstore_read(int objid, char *buf, int size, struct objfs_state *objfs, of
         int off = (int)i_value[j];
         //dprintf("off = %d\n",off);
         // read_block(objfs,off,(char*)(temp+count*BLOCK_SIZE));
+        // pthread_mutex_lock(&cache_lock);
         new_read(objfs,off- data_offset ,(char*)(temp+count*BLOCK_SIZE));
+        // pthread_mutex_lock(&cache_lock);
         n--;
         count++;
       }
@@ -445,7 +464,7 @@ long objstore_read(int objid, char *buf, int size, struct objfs_state *objfs, of
   return size;
 }
 
-void find_in_cache(struct objfs_state *objfs,int pos){
+void find_new(struct objfs_state *objfs,int pos){
   int block = pos/CACHE_VALUE;
   int block_offset = pos%CACHE_VALUE;
   char *cache_ptr = objfs->cache;
@@ -454,6 +473,12 @@ void find_in_cache(struct objfs_state *objfs,int pos){
     cache_dirty[block_offset]=0;
     cache_array[block_offset] = -1;
   }
+}
+
+void find_in_cache(struct objfs_state *objfs,int pos){
+  pthread_mutex_lock(&cache_lock);
+  find_new(objfs,pos);
+  pthread_mutex_unlock(&cache_lock);
 }
 
 long destroy_object(const char *key, struct objfs_state *objfs)
@@ -474,7 +499,9 @@ long destroy_object(const char *key, struct objfs_state *objfs)
               int r = value%32;
               d_bitmap[q] = (d_bitmap[q]^(1<<(31-r)));
               obj->d_ptr[i]=0;
+              // pthread_mutex_lock(&cache_lock);
               find_in_cache(objfs,value);
+              // pthread_mutex_unlock(&cache_lock);
             }
             // else break;
           }
@@ -491,7 +518,9 @@ long destroy_object(const char *key, struct objfs_state *objfs)
                   int q = value/32;
                   int r = value%32;
                   d_bitmap[q] = (d_bitmap[q]^(1<<(31-r)));
+                  // pthread_mutex_lock(&cache_lock);
                   find_in_cache(objfs,value);
+                  // pthread_mutex_unlock(&cache_lock);
                 }
               }
               obj->i_ptr[i]=0;
@@ -500,7 +529,9 @@ long destroy_object(const char *key, struct objfs_state *objfs)
               int q = value/32;
               int r = value%32;
               d_bitmap[q] = (d_bitmap[q]^(1<<(31-r)));
+              // pthread_mutex_lock(&cache_lock);
               find_in_cache(objfs,value);
+              // pthread_mutex_unlock(&cache_lock);
             }
             // else break;
           }
@@ -576,7 +607,7 @@ long destroy_object(const char *key, struct objfs_state *objfs)
 }
 
 
-long objstore_write(int objid, const char *buf, int size, struct objfs_state *objfs, int offset)
+long objstore_write(int objid, const char *buf, int size, struct objfs_state *objfs, off_t offset)
 {
   // //dprintf("%s\n",buf);
   // //dprintf("<-------->\n");
@@ -696,7 +727,7 @@ long objstore_write(int objid, const char *buf, int size, struct objfs_state *ob
   return -1;
 }
 
-long objstore_read(int objid, char *buf, int size, struct objfs_state *objfs, int offset)
+long objstore_read(int objid, char *buf, int size, struct objfs_state *objfs, off_t offset)
 {
   
   struct object *obj = objs + objid - 2;
@@ -778,6 +809,30 @@ int fillup_size_details(struct stat *buf)
 /*
    Set your private pointeri, anyway you like.
 */
+
+void initialize(struct objfs_state *objfs){
+  malloc_4k(objs,22528*BLOCK_SIZE);
+  malloc_4k(obj_backup,OBJ_SIZE);
+  malloc_4k(i_bitmap,IMAP_BLOCKS*BLOCK_SIZE);
+  malloc_4k(d_bitmap,DMAP_BLOCKS*BLOCK_SIZE);
+  malloc_4k(darray,22528*4);
+  malloc_4k(cache_dirty,CACHE_VALUE*4);
+  malloc_4k(cache_array,CACHE_VALUE*4);
+}
+
+void objfs_copying(struct objfs_state *objfs){
+  char* temp;
+  malloc_4k(temp,BLOCK_SIZE);
+  for(int i=0;i<22528;i++){
+    read_block(objfs,i+inode_offset,(char*)temp);
+    for(int j=0; j < 4048; j++){
+      *((char*)objs+i*4048+j) = *(temp+j);
+    }
+  }
+  free_4k(temp,BLOCK_SIZE);
+}
+
+
 int objstore_init(struct objfs_state *objfs)
 {
   //dprintf("Entered objstore init\n");
@@ -819,6 +874,7 @@ int objstore_init(struct objfs_state *objfs)
   }
   pthread_mutex_init(&ilock,NULL);
   pthread_mutex_init(&dlock,NULL);
+  pthread_mutex_init(&cache_lock,NULL);
   // for(int i=0; i < 22528; i++){
   //   read_block(objfs,inode_offset+i,((char*)objs+i*4048));
   // }
@@ -829,6 +885,37 @@ int objstore_init(struct objfs_state *objfs)
 /*
    Cleanup private data. FS is being unmounted
 */
+
+void free_func(struct objfs_state *objfs){
+  free_4k(objs,22528*BLOCK_SIZE);
+  free_4k(obj_backup,OBJ_SIZE);
+  free_4k(i_bitmap,IMAP_BLOCKS*BLOCK_SIZE);
+  free_4k(d_bitmap,DMAP_BLOCKS*BLOCK_SIZE);
+  free_4k(darray,22528*4);
+  free_4k(cache_dirty,CACHE_VALUE*4);
+  free_4k(cache_array,CACHE_VALUE*4);
+}
+
+void objfs_copying_back(struct objfs_state *objfs){
+  char* temp;
+  malloc_4k(temp,BLOCK_SIZE);
+  for(int i=0; i < 22528; i++){
+    if(darray[i]==1){
+      // //dprintf("dirty is 1 for i = %d\n",i);
+      for(int j=0; j < 4048; j++){
+        *(temp+j)=*((char*)objs+i*4048+j);
+        // //dprintf("%c",*(temp+j));
+      }
+      write_block(objfs,inode_offset+i,(char*)temp);
+      
+      // write_block(objfs,287+i,(char*)((char*)objs+i*BLOCK_SIZE));
+      
+    }
+  }
+  free_4k(temp,BLOCK_SIZE);
+}
+
+
 int objstore_destroy(struct objfs_state *objfs)
 {
   for(int i=0; i < IMAP_BLOCKS; i++){
